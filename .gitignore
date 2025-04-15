@@ -1,0 +1,7 @@
+conf
+sync
+start.sh
+py_mess.py
+test.hash
+*log
+__pycache__
