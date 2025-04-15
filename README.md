@@ -1,6 +1,6 @@
-# simple-ssh-sync (ssshs)
+# sr-sync (simple r-sync)
 ## State
-- [X] SSH Conection
+- [X] sr-sync Conection
     - [X] Auth
     - [X] Connects
     - [X] Sees files 
@@ -8,13 +8,15 @@
     - [ ] Multi-hostname for Remote to Remote
     - [ ] Local
         - [X] Put
-        - [ ] Remove
+        - [X] Remove
         - [X] Create
+        - [ ] SSH Functions to use
     - [ ] Remote
         - [X] Download
         - [ ] Create
         - [ ] Remove
         - [ ] Put
+        - [ ] SSH Functions to use 
 - [X] Sync (`One2Zero`)
     - [X] One Way 
         - [X] Remote Mirror, Local Target

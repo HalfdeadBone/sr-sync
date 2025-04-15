@@ -4,7 +4,7 @@ import lib.files as files
 from lib.cmd import *
 import lib.connections as connections
 from lib.dataformats import *
-from lib.os import OsSSHOperations
+
 import hashlib
 import json
 import sys
@@ -41,7 +41,6 @@ def main():
     if cfg:
         for config in cfg:
             client = connections.SimpleSSHClient(config)
-            client.EstablishSftp()
 
 
 if __name__ == "__main__":

@@ -6,8 +6,9 @@ import stat
 import logging
 import hashlib
 import lib.dataformats as dataformats
+from lib.files import LocalFilesAndDirs, RemoteFilesAndDirs
 from lib.dataformats import PathDict, HashDict, SyncTask
-from lib.os import OsSSHOperations
+
 
 paramiko.util.log_to_file("paramiko.log")
 
@@ -21,7 +22,14 @@ class SimpleSSHClient:
         self.user = user
         self.pwd = ""
         self.config = config
+        self.LocalManagment = LocalFilesAndDirs() #Platform Inside
+        #After Basic Values
         self._SetConfigValues()
+        self._ConnectToHost() #Set client
+        
+        # Init Remote Managment and set platform for it
+        self.RemoteManagment = RemoteFilesAndDirs()
+        self._RemotePlatform(self.session)
 
     def _SetConfigValues(self):
         if self.config:
@@ -29,6 +37,26 @@ class SimpleSSHClient:
             self.user = self.config.user
             self.key = self.config.keyPath if self.config.keyPath else None
             self.pwd = self.config.pwd
+
+    def _ConnectToHost(self):
+        # we coooould use Context... Note for later
+        self._ValidationPreConnection(
+            {"hostname": self.hostname, "user": self.user}, name=self.name
+        )
+        self.session.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        try:
+            self.session.connect(
+                hostname=self.hostname,
+                username=self.user,
+                password=self.pwd,
+                key_filename=self.key,
+            )
+            logging.info("Connected via SSH to '{}'".format(self.name))
+        except Exception as e:
+            raise AttributeError(e)
+
+    def _RemotePlatform(self, pathList, relPath):
+        self.RemoteManagment.GetPlatform()
 
     ### IDEA VALIDATION OF CONFIG SHOULD RETURN error type + MSG
     ### THEN FULL _ValidateConfig should be created
@@ -61,23 +89,6 @@ class SimpleSSHClient:
             )
             logging.error(msg)
             raise (TypeError(msg))
-
-    def _ConnectToHost(self):
-        # we coooould use Context... Note for later
-        self._ValidationPreConnection(
-            {"hostname": self.hostname, "user": self.user}, name=self.name
-        )
-        self.session.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        try:
-            self.session.connect(
-                hostname=self.hostname,
-                username=self.user,
-                password=self.pwd,
-                key_filename=self.key,
-            )
-            logging.info("Connected via SSH to '{}'".format(self.name))
-        except Exception as e:
-            raise AttributeError(e)
 
     def _IsDir(self, st_mode: str):
         return stat.S_ISDIR(st_mode)
@@ -129,6 +140,9 @@ class SimpleSSHClient:
     def _CombineMirrorAndTarget(
         self, foundPath, fillPath, remoteMirror, originalRemoteFolder, isDir
     ):
+        """
+        Returns proper SyncTask configure to account "remoteMirror" value.
+        """
         if remoteMirror:
             return SyncTask(
                 remoteMirror=remoteMirror,
@@ -179,55 +193,6 @@ class SimpleSSHClient:
         newSync = [SyncTask(**json.loads(x)) for x in newSync]
         return toDownload, toRemove, newSync
 
-    def GetPathDict(
-        self, pathList, originalPath="", remote=True, ignoreDir=True
-    ) -> list:
-        """
-        Creates list of objects: PathDict, that represents local and remote connection()
-
-        :param pathList     :List of Syncronized objects: SyncTask, represening Task
-        :param originalPath :String containing original remote path, before reentering. Set by method
-        :param remote       :checks if Mirror is remote (not used for now)
-        :param ignoreDir    :Bool representing if Dir should be added to finalList
-
-        :returns: List[PathDict] or empty list
-        """
-        finalList = []
-        for pathObj in pathList:
-            if not originalPath:
-                originalPath = pathObj.GetRemotePath()
-            targetStat = self._GetTargetStat(pathObj.GetRemotePath())
-            if targetStat:
-                subDir = pathObj.GetSubDirFromRemotePath(originalPath=originalPath)
-                if self._IsDir(targetStat.st_mode):
-                    subDir = pathObj.GetSubDirFromRemotePath(originalPath=originalPath)
-                    if not originalPath == pathObj:
-                        finalList.append(
-                            PathDict(
-                                **pathObj.__dict__,
-                                subDir=subDir,
-                                filename=None,
-                                st_mode=targetStat.st_mode,
-                                relPath=subDir,
-                            )
-                        )
-                    # pathList =  self._ListAllRemoteFile(pathObj, returnDir=False)
-                    # finalList.extend(self.GetPathDict(pathList = pathList, originalPath=originalPath))
-                else:
-                    filename = str(pathObj.GetRemotePath().split("/")[-1])
-                    subDir = pathObj.GetSubDirFromRemotePath(originalPath=originalPath)
-                    finalList.append(
-                        PathDict(
-                            **pathObj.__dict__,
-                            subDir=subDir,
-                            filename=filename,
-                            st_mode=targetStat.st_mode,
-                            st_mtime=targetStat.st_mtime,
-                            relPath=subDir + filename,
-                        )
-                    )
-        return finalList
-
     def _GetRelPath(self, pathA: str, pathB: str, isDir=False):
         pathA = pathA.split("/")
         pathB = pathB.split("/")
@@ -242,7 +207,7 @@ class SimpleSSHClient:
         # if isDir: subDir.pop(0)
         return "/".join(x for x in subDir)
 
-    def NewGetRemoteListPathDict(
+    def GetRemoteListPathDict(
         self, pathList, originalPath=None, remote=True, ignoreDir=True
     ) -> list:
         """
@@ -307,10 +272,7 @@ class SimpleSSHClient:
                 hashList.append(HashDict(hash=h, relPath=path.removeprefix(relPath)))
         return hashList
 
-    def _RemoteSSHHash(self, pathList, relPath):
-        ssh = OsSSHOperations(self.session)
-        ssh.GetPlatform()
-        return ssh.HashOut(path=pathList, relPath=relPath)
+
 
     def GetHash(self, relPath, pathList, remote=True):
         if remote:
@@ -343,7 +305,7 @@ class SimpleSSHClient:
         for pathObj in removeList:
             pass
 
-    def PutChosenTarget(self, mirrorPath, targetPath):
+    def PutChosenTarget(self, list):
         pass
 
     def UpdatePathsWithHash(self):

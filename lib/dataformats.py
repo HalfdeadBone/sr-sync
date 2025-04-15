@@ -31,8 +31,7 @@ class SyncTask:
         split = self.GetRemotePath()
         return copy(str(split).split("/")[-1])
     
-    def GenerateRelPath():
-        pass
+
 
 @dataclass(slots=True)
 class PathDict(SyncTask):

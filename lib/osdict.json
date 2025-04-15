@@ -1,0 +1,19 @@
+{
+    "platformCMD": {
+        "MacOS":"sw_vers",
+        "Linux":"uname", 
+        "Win":  "ver"
+    },
+    "win":{
+        "unsafePaths": ["C:\\", "D:\\ " , ".", "..", " " ],
+        "md5": ""
+    },
+    "Linux":{
+        "unsafePaths": ["/", " " , ".", ".." ],
+        "md5": "md5sum -b"
+    },
+    "MacOs":{
+        "unsafePaths": ["/", " " , ".", ".." ],
+        "md5": "md5"
+    }
+}

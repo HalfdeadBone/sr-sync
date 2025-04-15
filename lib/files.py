@@ -1,12 +1,16 @@
 import os
-from lib.dataformats import *
+import shutil
 import json
+import logging
+
 from pathlib  import Path
 from dotenv import load_dotenv
-import logging
 from json import JSONEncoder
 from datetime import datetime
 from getpass import getpass
+
+from lib.dataformats import *
+
 
 print("Is dotenv:" + str(load_dotenv()))
 
@@ -19,8 +23,94 @@ class ENVPaths():
         self.configFolder = self.appFolder + os.environ['CONFIG_FOLDER']
         self.keysFolder = self.appFolder + os.environ['KEYS_FOLDER']
         self.globalConfig = self.configFolder + "global.json"
+        self.libFolder = self.appFolder + os.environ['LIB_FOLDER']
 
-class LocalFilesAndDirs():
+class OSCmd(ENVPaths):
+    def __init__(self):
+        super().__init__() 
+        self.platform = None
+        self.platformCommands = {"MacOS":'sw_vers', "Linux": 'uname', "Win":'ver'}
+        self.md5 = {"Linux": "md5sum -b", "Win": "", "MacOS": "md5"}
+        self.osdictPath = self.libFolder + "osdict.json"
+        self.osdict = None
+        self._GetOsDict()
+
+    def _GetOsDict(self):
+        with open(self.osdictPath) as f:
+            self.osdict = json.load(f) 
+
+
+class RemoteFilesAndDirs(OSCmd):
+    def __init__(self, client):
+        super().__init__() 
+        self.client = client
+        self._SetPlatform()
+
+    def _SetPlatform(self):
+        for t, cmd in self.platformCommands.items():
+            try:
+                stdin, stdout, stderr = self.client.exec_command(cmd)
+                err = self._decodeSSHCommandOutput(stderr)
+                if err:
+                    logging.info("Not {} platform".format(t))
+                else: self.platform = t
+            except Exception as e:
+                logging.error(e)
+                raise(e)
+        if not self.platform:
+            msg = "Could not find platform for the config. Couldn't execute command"
+            logging.error(msg)
+            raise(Exception(msg))
+
+    def _LoadConfigJson(self):
+        pass
+
+    def _decodeSSHCommandOutput(self,output):
+        return output.read().decode('ascii').strip("\n")
+
+    def GetPlatform(self):
+        for t, cmd in self.platformCommands.items():
+            try:
+                stdin, stdout, stderr = self.client.exec_command(cmd)
+                err = self._decodeSSHCommandOutput(stderr)
+                if err:
+                    logging.info("Not {} platform".format(t))
+                else: self.platform = t
+            except Exception as e:
+                logging.error(e)
+                raise(e)
+        if not self.platform:
+            msg = "Could not find platform for the config. Couldn't execute command"
+            logging.error(msg)
+            raise(Exception(msg))
+        return(self.platform)
+
+    def _MD5ToJSON(self, raw, relPath):
+        out = []
+        lines = raw.split("\n")
+        for line in lines:
+            md5, path = line.split(" *")
+            path = path.removeprefix(relPath)
+            out.append(HashDict(md5, path))
+        return out
+        
+
+    def HashOut(self, path, relPath, raw=False):
+        if type(path) == list:
+            path = " ".join(str(x) for x in path)
+        try: 
+            cmd = self.md5[self.platform] + " " + path
+            stdin, stdout, stderr = self.client.exec_command(cmd)
+            out = self._decodeSSHCommandOutput(stdout)
+        except Exception as e:
+            logging.error(e)
+            raise(e)
+        if not raw:
+            out = self._MD5ToJSON(out, relPath)
+        return out
+
+
+class LocalFilesAndDirs(OSCmd):
     def ReadJSONFile(self, path):
         try:    
             return json.load(open(path))
@@ -40,11 +130,11 @@ class LocalFilesAndDirs():
             except IOError as e:
                 msg= "Could not create Directory at {}".format(path)
                 logging.error(msg, e)
-                raise(msg,e)
+                raise e
             except Exception as e:
                 msg= "Unexpected error has occured at{}".format(path)
                 logging.error(msg)
-                raise(msg,e )
+                raise e
         else:
             msg = "Folder exists {}, skipping".format(path)
             logging.info(msg)
@@ -56,11 +146,11 @@ class LocalFilesAndDirs():
         except IOError as e:
             msg = "Could not create file with {}".format(path)
             logging.error(msg, e)
-            raise(e, msg)
+            raise e
         except Exception as e:
             msg = "Unexpected error has occured with{}".format(path)
             logging.error(msg)
-            raise(e, msg)
+            raise e
     
     def AppendToFile(self, path, data):
         try:
@@ -69,19 +159,51 @@ class LocalFilesAndDirs():
         except IOError as e:
             msg= "Could not append to file with {}".format(path)
             logging.error(msg, e)
-            raise(e, msg)
+            raise eb
         except Exception as e:
             msg= "Unexpected error has occured with{}".format(path)
             logging.error(msg)
-            raise(e, msg)
+            raise e
 
-    def RemoveFolder(path):
-        pass
+    def _CheckRemoveSafePaths(path):
+        if not path in self.unsafePaths:
+            return True
+        return False
+
+    def _CheckIfFileExists(self, path):
+        return os.path.exists(path)
+
+    def RemoveTarget(self, syncTask, isDir=False):
+        path = syncTask.GetLocalPath()
+        if self._CheckRemoveSafePaths(path):
+            if isDir: _RemoveFolder(path)
+            else: _RemoveFile(path)
+        else: 
+            msg = "Error Unsafe path {}".format(syncTask.__dict__)
+            raise msg
+
+    def _RemoveFolder(self, path):
+        # I might be Paranoid, but i know that once i will forget it
+        # And i'm going to delete system. 
+        if self._CheckRemoveSafePaths(path):
+            shutil.rmtree(path)
+        else:
+            msg = "ERROR: Found unsafe path somehow passed {}".format(path)
+            logging.error(msg)
+            raise msg
+    
+    def _RemoveFile(self, path):
+        if self._CheckRemoveSafePaths(path):
+            os.remove(path)
+        else:
+            msg = "FERROR: ound unsafe path {}".format(path)
+            logging.error(msg)
+            raise msg
 
     def LocalHashMd5(self, text):
         return hashlib.md5(text.encode()).hexdigest()
 
-class ConfigLoader(ENVPaths, LocalFilesAndDirs):
+class ConfigLoader(LocalFilesAndDirs):
     def __init__(self):
         super().__init__() 
     
