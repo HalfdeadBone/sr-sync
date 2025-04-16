@@ -26,7 +26,7 @@ class SimpleSSHClient:
         
         # Init Remote Managment and set platform for it
         self.RemoteManagment = RemoteFilesAndDirs()
-        self._RemotePlatform(self.session)
+        self._RemotePlatform(client= self.client, sftp = self.sftp)
 
     def _SetConfigValues(self):
         if self.config:
@@ -78,15 +78,6 @@ class SimpleSSHClient:
             logging.error(msg)
             raise TypeError(msg)
 
-    def _ValidationMirrorTargetPath(self, syncObj, name):
-        filename = syncObj.GetRemotePath().split("/")[-1]
-        if not syncObj.GetLocalPath().split("/")[-1] == filename:
-            msg = "Config wrongly configured - matched Directory and File, for {} in 'paths': {}".format(
-                name, syncObj.__dict__
-            )
-            logging.error(msg)
-            raise (TypeError(msg))
-
     def _IsDir(self, st_mode: str):
         return stat.S_ISDIR(st_mode)
 
@@ -122,18 +113,6 @@ class SimpleSSHClient:
         else:
             return None
 
-    def _GetListSyncPathRemoteFiles(self, syncObj, originalPath=None):
-        remoteList = []
-        ## Should be in ConfigLoader :/
-        self._ValidationMirrorTargetPath(syncObj=syncObj, name=self.name)
-        syncObj = self._StatSyncPathRemote(syncObj)
-        if syncObj:
-            if syncObj.isDir:
-                remoteList.extend(self._GetSyncPathRemoteFolder(syncObj=syncObj))
-            else:
-                remoteList.append(syncObj)
-        return remoteList
-
     def _CombineMirrorAndTarget(
         self, foundPath, fillPath, remoteMirror, originalRemoteFolder, isDir
     ):
@@ -156,21 +135,10 @@ class SimpleSSHClient:
                 isDir=isDir,
             )
 
-    def _GetTargetStat(self, path):
-        targetStat = None
-        try:
-            targetStat = self.sftp.stat(path)
-        except Exception as e:
-            logging.error("Target Doesnt Exist: {}".format(path))
-            logging.error(e)
-        return targetStat
 
     def EstablishSftp(self):
         self._ConnectToHost()
         self.sftp = self.session.open_sftp()
-
-    def _GetLocalPathDict(self, pathList, originalPath=None):
-        pass
 
     def ReSyncListOfSyncTask(self, syncTaskList):
         #syncTaskList change to self.LastTaskList, allows to just call last sync
@@ -191,6 +159,7 @@ class SimpleSSHClient:
         newSync = [SyncTask(**json.loads(x)) for x in newSync]
         #newSync needs to be verify via HASH, so here should be method for that
         # it would need to return list of task sync, after pathDicts
+        # for now no hashing always download all
         return toMove, toRemove, newSync
 
     def _GetRelPath(self, pathA: str, pathB: str, isDir=False):
@@ -211,7 +180,8 @@ class SimpleSSHClient:
         self, syncList, originalPath=None, remote=True, ignoreDir=True
     ) -> list:
         """
-        Creates list of objects: PathDict, that represents local and remote connection()
+        Creates list of objects: PathDict, that represents local and remote connection, for future Hash keeping
+        to verify versions of files. 
 
         :param syncList     :List of Syncronized objects: SyncTask, represening Task
         :param originalPath :String containing original remote path, before reentering. Set by method
@@ -241,7 +211,7 @@ class SimpleSSHClient:
     ):
         if not originalPath:
             originalPath = syncObj.GetRemotePath()
-        targetStat = self._GetTargetStat(syncObj.GetRemotePath())
+        targetStat = self.RemoteManagment.GetStat(syncObj.GetRemotePath())
         if targetStat:
             if self._IsDir(targetStat.st_mode) and ignoreDir:
                 return None
@@ -278,23 +248,6 @@ class SimpleSSHClient:
         else:
             return self._LocalHash(pathList=pathList, relPath=relPath)
 
-    def GetChosenTarget(self, syncObjList):
-        """
-        Downloads From Mirror to Target
-        """
-        for syncObj in syncObjList:
-            if not syncObj.filename and not os.path.exists(syncObj.GetLocalPath()):
-                os.mkdir(syncObj.GetLocalPath())
-                logging.info("Created Directory at {}".format(syncObj.GetLocalPath()))
-            if syncObj.filename:
-                self.sftp.get(
-                    localpath=syncObj.GetLocalPath(), remotepath=syncObj.GetRemotePath()
-                )
-    
-    def NewDownloadChosenTarget(self, syncTaskList):
-        for syncObj in syncTaskList:
-            path
-
     def OpenTarget(self, path, mode="r", bufsize=-1):
         target = None
         try:
@@ -305,25 +258,43 @@ class SimpleSSHClient:
 
     def CheckSum(self, a, b) -> bool:
         return self._HashMd5(a) == self._HashMd5(b)
-
-    def RemoveChosenTarget(self, removeList: list[SyncTask]):
-        for syncObj in removeList:
-            #Local changes if remote mirror
-            if not syncObj.remoteMirror:
-                pass
-            else:
-                pass
-
-
-    def PutChosenTarget(self, putList: list[PathDict]):
-        for syncObj in put:
-            self.sft.put(
+    
+    def DownloadChosenTarget(self, syncObj):
+        """
+        Downloads From Mirror to Target
+        """
+        if syncObj.isDir and not os.path.exists(syncObj.GetLocalPath()):
+            self.LocalManagment.CreateFolder(path=syncObj.GetLocalPath())
+        if syncObj.filename:
+            self.sftp.get(
                 localpath=syncObj.GetLocalPath(), remotepath=syncObj.GetRemotePath()
             )
+            logging.info("Downloaded file: {}".format(syncObj.GetLocalPath()))
+
+    def GetSyncTaskList(self, taskList):
+        syncList = []
+        for taskObj in taskList:
+            if taskObj.remoteMirror: syncList.append(**self.RemoteManagment.CreateSyncTask(taskObj))
+            else: syncList.append(**self.fLocalFilesAndDirs.CreateSyncTask(taskObj))
+        return syncList
+
+    def PutChosenTarget(self, syncObj):
+        if syncObj.isDir and not self.sftp.stat(syncObj.GetRemotePath()):
+            self.sftp.mkdir(syncObj.GetRemotePath())
+        self.sft.put(
+            localpath=syncObj.GetLocalPath(), remotepath=syncObj.GetRemotePath()
+        )
+        logging.info("Downloaded file: {}".format(syncObj.GetRemotePath()))
 
     def UpdatePathsWithHash(self, pathDictList):
         pass
-    
+
+    def MoveAction(self, syncObj):
+        if not syncObj.remoteMirror:
+            self.DownloadChosenTarget(syncTask=syncObj)
+        elif syncObj.remoteMirror:
+            self.PutChosenTarget(SyncTask=syncObj)
+
     def RemoveAction(self, syncObj):
         # if remoteMirror ==  True, them remove and make in local 
         if syncObj.remoteMirror:

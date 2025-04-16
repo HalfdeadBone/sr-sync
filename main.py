@@ -41,7 +41,7 @@ def main():
     if cfg:
         for config in cfg:
             client = connections.SimpleSSHClient(config)
-
+            
 
 if __name__ == "__main__":
     main()

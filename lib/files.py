@@ -41,9 +41,10 @@ class OSCmd(ENVPaths):
 
 
 class RemoteFilesAndDirs(OSCmd):
-    def __init__(self, client):
+    def __init__(self, client, sftp):
         super().__init__() 
         self.client = client
+        self.sftp = sftp
         self._SetPlatform()
 
     def _SetPlatform(self):
@@ -62,11 +63,15 @@ class RemoteFilesAndDirs(OSCmd):
             logging.error(msg)
             raise(Exception(msg))
 
-    def _LoadConfigJson(self):
-        pass
-
     def _decodeSSHCommandOutput(self,output):
         return output.read().decode('ascii').strip("\n")
+    
+    def _ValidationMirrorTargetPath(self, syncObj):
+        filename = syncObj.GetRemotePath().split("/")[-1]
+        if not syncObj.GetLocalPath().split("/")[-1] == filename:
+            msg = "Config wrongly created - File matched with Folder in 'paths': {}".format(syncObj.__dict__)
+            logging.error(msg)
+            raise (TypeError(msg))
 
     def GetPlatform(self):
         for t, cmd in self.platformCommands.items():
@@ -93,7 +98,12 @@ class RemoteFilesAndDirs(OSCmd):
             path = path.removeprefix(relPath)
             out.append(HashDict(md5, path))
         return out
-        
+
+    def _CheckIfFileExists(self, path):
+        try:
+            self.sftp.stat(path)
+            return True
+        except: return False
 
     def HashOut(self, path, relPath, raw=False):
         if type(path) == list:
@@ -109,6 +119,62 @@ class RemoteFilesAndDirs(OSCmd):
             out = self._MD5ToJSON(out, relPath)
         return out
 
+    def RemoveTarget(self, path):
+        if self._CheckRemoveSafePaths(path):
+            if self._CheckIfFileExists(path):
+                if syncTask.isDir: _RemoveFolder(path)
+                else: _RemoveFile(path)
+            else: 
+                msg = "Remote file/directory doesn't exist: {}".format(path)
+                logging.info(msg)
+        else: 
+            msg = "Error Unsafe path {}".format(syncTask.__dict__)
+            raise msg
+
+    def _RemoveFolder(self, path):
+        # I might be Paranoid, but i know that once i will forget it
+        # And i'm going to delete system.
+        if self._CheckRemoveSafePaths(path):
+            listDir = self.sftp.listdir(path)
+            if listDir:
+                for toDelete in listDir:
+                    logging.info("Found new path \'{}\' in folder {}".format(toDelete, path))
+                    self.RemoveTarget(toDelete)
+            self.sft.rmdir(path)
+        else:
+            msg = "ERROR: Found unsafe path somehow passed check {}".format(path)
+            logging.error(msg)
+            raise msg
+    
+    def _RemoveFile(self, path):
+        if self._CheckRemoveSafePaths(path):
+            self.sftp.remove(path)
+        else:
+            msg = "FERROR: found unsafe path, somehow passed check {}".format(path)
+            logging.error(msg)
+            raise msg
+
+    def GetStat(self, path):
+        targetStat = None
+        try:
+            targetStat = self.sftp.stat(path)
+        except Exception as e:
+            logging.error("Target Doesnt Exist: {}".format(path))
+            logging.error(e)
+        return targetStat
+
+    def CreateSyncTask(self, syncObj, originalPath=None):
+        remoteList = []
+        ## Should be in ConfigLoader :/
+        self._ValidationMirrorTargetPath(syncObj=syncObj)
+        syncObj = self._StatSyncPathRemote(syncObj)
+        if syncObj:
+            if syncObj.isDir:
+                remoteList.extend(self._GetSyncPathRemoteFolder(syncObj=syncObj))
+            else:
+                remoteList.append(syncObj)
+        return remoteList
+        
 
 class LocalFilesAndDirs(OSCmd):
     def ReadJSONFile(self, path):
@@ -123,7 +189,6 @@ class LocalFilesAndDirs(OSCmd):
         
     def CreateFolder(self, path):
         if not os.path.isdir(path):
-            print(path)
             try:    
                 os.mkdir(path)
                 logging.info("Created Directory at {}".format(path))
@@ -176,7 +241,7 @@ class LocalFilesAndDirs(OSCmd):
     def RemoveTarget(self, syncTask, isDir=False):
         path = syncTask.GetLocalPath()
         if self._CheckRemoveSafePaths(path):
-            if isDir: _RemoveFolder(path)
+            if syncTask.isDir: _RemoveFolder(path)
             else: _RemoveFile(path)
         else: 
             msg = "Error Unsafe path {}".format(syncTask.__dict__)
@@ -199,6 +264,34 @@ class LocalFilesAndDirs(OSCmd):
             msg = "FERROR: ound unsafe path {}".format(path)
             logging.error(msg)
             raise msg
+    
+    def CreateSyncTask(self, taskObj):
+        localPath = taskObj.GetLocalPath()
+        if os.path.isfile(localPath):
+            taskObj.isDir = False
+            return taskObj
+        else: 
+            taskList = []
+            taskDir = SyncTask(
+                remoteMirror=taskObj.remoteMirror,
+                isDir=True,
+                mirrorPath=taskObj.mirrorPath,
+                targetPath=taskObj.targetPath
+            )
+            self.GetLocalSyncTaskList(self._GetListSyncTaskFiles(taskObj=taskObj))
+            return taskList
+
+    def _GetListSyncTaskFromFolder(self, taskObj):
+        pathList=[]
+        for entry in os.scandir(path):
+            pathList.append(SyncTask(
+                mirrorPath=taskObj.GetLocalPath(),
+                targetPath=entry.path,
+                isDir=None,
+                remoteMirror=True
+            ))
+            pathList.append(entry.path)
+        return pathList
 
     def LocalHashMd5(self, text):
         return hashlib.md5(text.encode()).hexdigest()

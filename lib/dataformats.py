@@ -65,6 +65,9 @@ class DataConfig:
     configPath: str = ""
     times: _TimesData = _TimesData
 
+    def toDict():
+        return self.__dict__
+
 @dataclass(slots=True,init=True)
 class ClientConfig(DataConfig):
     hostname: str = ""
@@ -80,6 +83,7 @@ class ClientConfig(DataConfig):
 
     def GetPathList(self):
         return self.paths
+
 
 @dataclass(slots=True) 
 class GlobalConfig(DataConfig):
