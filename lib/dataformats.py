@@ -7,6 +7,8 @@ class _ToJSON():
         return(self.__dict__())
 
 
+## To fix situation remote2remote create alternative
+# BaseConfig where hostname could be applied 
 @dataclass
 class SyncTask:
     remoteMirror: bool = True
@@ -26,12 +28,11 @@ class SyncTask:
         if self.remoteMirror: return self.targetPath
         else: return self.mirrorPath
     
-    def GenerateFilename(self):
+    def GetFilename(self):
         if self.isDir: return None
         split = self.GetRemotePath()
         return copy(str(split).split("/")[-1])
     
-
 
 @dataclass(slots=True)
 class PathDict(SyncTask):
@@ -40,7 +41,8 @@ class PathDict(SyncTask):
     relPath: str = ""
     st_mode: str = ""
     st_mtime: str = ""
-    localHash:str = ""
+    targetHash: str = ""
+    mirrorHash: str = ""
     
     def UpdateRelPath(self):
         self.relPath = self.subDir + self.filename
@@ -85,12 +87,6 @@ class GlobalConfig(DataConfig):
 
     def ExcludedConfigs(self):
         print({"Config Name": self.name, "Excluded Configs": self.excludedNames})
-
-    
-# Użyj seta przy tworzeniu listy by usunąć powtórzenia ^^
-# Duplikowanie pobierań/wysyłu będzie do targetów wielu ale jebać nie mam na to siły
-
-# z 2 hash list wyciągnij relPath i wpierdol zrób sobie 
 
 @dataclass
 class HashDict():

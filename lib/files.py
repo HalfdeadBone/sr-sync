@@ -217,10 +217,15 @@ class ConfigLoader(LocalFilesAndDirs):
 
     def GenerateClientConfig(name:str, hostname:str, mirrorPath:str, targetPath:str, user:str ,passwordReq: bool = True, keyPath:str="", remoteMirror=True, isDir=False, toFile = False):
         if name and toFile:
-            name = _ValidateClientConfigName(filename, toFile=False )
+            name = self._ValidateClientConfigName(filename, toFile=False )
             configPath = self.configFolder + name
+        elif not name: 
+            name = self.GetFilename() 
+            configPath = ""
         else: cofigPath = ""
-        pwd = getpass("Please enter password to Instance: ")
+        if not pwd:
+            pwd = InputPassword()
+
         cfg = ClientConfig(
             syncType="ZeroToOne",
             passwordReq=True,
@@ -235,6 +240,9 @@ class ConfigLoader(LocalFilesAndDirs):
         if toFile:
             self.CreateFile(self.configPath)
         return cfg
+    
+    def InputPassword():
+        pwd = getpass("Please enter password to Instance: ")
 
     def CheckIfConfigFolderExists(self) -> bool:
         b = os.path.isdir(self.configFolder)
