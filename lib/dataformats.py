@@ -32,7 +32,9 @@ class SyncTask:
         if self.isDir: return None
         split = self.GetRemotePath()
         return copy(str(split).split("/")[-1])
-    
+
+    def toDict(self):
+        return self.__dict__
 
 @dataclass(slots=True)
 class PathDict(SyncTask):
@@ -102,5 +104,5 @@ class HashDict():
     hash:str
     relPath:str 
     
-    def GetHashLine():
+    def GetHashLine(self):
         return str(self.hash + " " + self.relPath) 

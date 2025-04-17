@@ -4,12 +4,20 @@ import lib.files as files
 from lib.cmd import *
 import lib.connections as connections
 from lib.dataformats import *
+import  logging
 
 import hashlib
 import json
 import sys
     
 def main():
+    logging.getLogger("paramiko").setLevel(logging.CRITICAL)
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - [%(levelname)s] - %(message)s',
+        datefmt='%H:%M:%S'
+    )
     # Check Structure
     localOp = files.ConfigLoader()
     if localOp.CheckIfConfigFolderExists():
@@ -18,9 +26,7 @@ def main():
     # Load Argvs and init coresponding
     cfg = None
     par = InitInlineParser()
-    print(sys.argv)
     command = list(set(sys.argv)&{"loadconfig","autorun", "manual"})[0]
-    print(command)
     if command == "manual":
         cfg = localOp.GenerateClientConfig(
             name=par.job_name,
@@ -46,9 +52,13 @@ def main():
     if cfg:
         for config in cfg:
             client = connections.SimpleSSHClient(config)
-            syncList = client.GetSyncTaskList(client.config.paths)
-            client.ReSyncListOfSyncTask(syncList)
+            # split for now. Could be at the same time, but that would be a problem in the future
+            for syncTask in client.config.paths:
+                syncList = client.GetSyncTaskList([syncTask])
+                toMove, toCreate, toRemove, targetSync = client.ReSyncListOfSyncTask(syncList, originalSyncTask = syncTask)
 
+                # Delete Unnecesery, Then create missing dirs, Then rest.
+                client.ExecuteSync(toRemove=toRemove, toCreate=toCreate, toMove=toMove)
 
 if __name__ == "__main__":
     main()

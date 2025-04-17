@@ -31,7 +31,7 @@ class OSCmd(ENVPaths):
     def __init__(self):
         super().__init__() 
         self.platform = None
-        self.platformCommands = {"MacOS":'sw_vers', "Linux": 'uname', "Win":'ver'}
+        self.platformCommands = None
         self.md5 = {"Linux": "md5sum -b", "Win": "", "MacOS": "md5"}
         self.osdictPath = self.libFolder + "osdict.json"
         self.osdict = None
@@ -39,7 +39,8 @@ class OSCmd(ENVPaths):
 
     def _GetOsDict(self):
         with open(self.osdictPath) as f:
-            self.osdict = json.load(f) 
+            self.osdict = json.load(f)
+            self.platformCommands = self.osdict["platformCMD"]
 
 class _CommonManagement():
     def __init__(self):
@@ -49,7 +50,7 @@ class _CommonManagement():
         return stat.S_ISDIR(st_mode)
 
     def _CombineMirrorAndTarget(
-        self, foundPath, fillPath, remoteMirror, originalRemoteFolder, isDir
+        self, foundPath, fillPath, remoteMirror, originaRemotelFolder, isDir
     ):
         """
         Returns proper SyncTask configure to account "remoteMirror" value.
@@ -58,13 +59,13 @@ class _CommonManagement():
             return SyncTask(
                 remoteMirror=remoteMirror,
                 mirrorPath=foundPath,
-                targetPath=fillPath + foundPath.removeprefix(originalRemoteFolder),
+                targetPath=fillPath + foundPath.removeprefix(originaRemotelFolder),
                 isDir=isDir,
             )
         else:
             return SyncTask(
                 remoteMirror=remoteMirror,
-                mirrorPath=fillPath + foundPath.removeprefix(originalRemoteFolder),
+                mirrorPath=fillPath + foundPath.removeprefix(originaRemotelFolder),
                 targetPath=foundPath,
                 isDir=isDir,
             )
@@ -102,7 +103,7 @@ class RemoteFilesAndDirs(OSCmd, _CommonManagement):
             logging.error(msg)
             raise (TypeError(msg))
 
-    def GetPlatform(self):
+    def _GetPlatform(self):
         for t, cmd in self.platformCommands.items():
             try:
                 stdin, stdout, stderr = self.client.exec_command(cmd)
@@ -200,8 +201,8 @@ class RemoteFilesAndDirs(OSCmd, _CommonManagement):
         if type(statAttr) == sftp_attr.SFTPAttributes:
             if self._IsDir(statAttr.st_mode):
                 syncObj.isDir = self._IsDir(statAttr.st_mode)
-                remoteList.append(syncObj)
                 # For now
+
                 remoteList.extend(self._GetSyncPathRemoteFolder(syncObj))
             else:
                 remoteList.append(syncObj)
@@ -218,7 +219,7 @@ class RemoteFilesAndDirs(OSCmd, _CommonManagement):
             syncTask = self._CombineMirrorAndTarget(
                 foundPath=relRemotePath + slash,
                 fillPath=syncObj.GetLocalPath(),
-                originalRemoteFolder=syncObj.GetRemotePath(),
+                originaRemotelFolder=syncObj.GetRemotePath(),
                 remoteMirror=syncObj.remoteMirror,
                 isDir=isDir,
             )
@@ -226,14 +227,26 @@ class RemoteFilesAndDirs(OSCmd, _CommonManagement):
                 if returnDir:
                     filesList.append(syncTask)
                 filesList.extend(self._GetSyncPathRemoteFolder(syncTask))
-            elif relRemotePath:
-                filesList.append(syncTask)
-            else:
-                continue
+            else: filesList.append(syncTask)
         return filesList
 
 
 class LocalFilesAndDirs(OSCmd,  _CommonManagement):
+    def __init__(self):
+        super().__init__()
+        self._SetPlatform()
+
+    def _SetPlatform(self):
+        for t, cmd in self.osdict["platformCMD"].items():
+            try:
+                os.system(cmd)
+                self.platform = t
+            except Exception as e:
+                logging.error(e)
+
+        self.md5 = self.osdict[self.platform]["md5"]
+        self.unsafePaths = self.osdict[self.platform]["unsafePaths"]
+
     def ReadJSONFile(self, path):
         try:    
             return json.load(open(path))
@@ -246,8 +259,8 @@ class LocalFilesAndDirs(OSCmd,  _CommonManagement):
         
     def CreateFolder(self, path):
         if not os.path.isdir(path):
-            try:    
-                os.mkdir(path)
+            try:
+                os.makedirs(path)
                 logging.info("Created Directory at {}".format(path))
             except IOError as e:
                 msg= "Could not create Directory at {}".format(path)
@@ -287,12 +300,10 @@ class LocalFilesAndDirs(OSCmd,  _CommonManagement):
             logging.error(msg)
             raise e
 
-    """
-        def _CheckRemoveSafePaths(path):
-        if not path in self.osdict[]:
+    def _CheckRemoveSafePaths(self, path):
+        if not path in self.osdict[self.platform]:
             return True
         return False
-    """
 
     def _CheckIfFileExists(self, path):
         return os.path.exists(path)
@@ -323,35 +334,41 @@ class LocalFilesAndDirs(OSCmd,  _CommonManagement):
             msg = "ERROR: Found unsafe path {}".format(path)
             logging.error(msg)
             raise msg
-    
+
+    ## I will fix them... I will remake them 4th?  5th time...
     def CreateSyncTaskList(self, taskObj):
+        taskList = []
         localPath = taskObj.GetLocalPath()
         if os.path.isfile(localPath):
             taskObj.isDir = False
-            return taskObj
-        else: 
-            taskList = []
-            taskDir = SyncTask(
-                remoteMirror=taskObj.remoteMirror,
-                isDir=True,
-                mirrorPath=taskObj.mirrorPath,
-                targetPath=taskObj.targetPath
-            )
-            taskList.append(self._GetListSyncTaskFromFolder(taskObj=taskObj))
-            return taskList
+            taskList.append(taskObj)
+        else:
+            taskObj.isDir = True
+            taskList.extend(self._GetListSyncTaskFromFolder(taskObj=taskObj, originalPath=taskObj.GetLocalPath()))
+        return taskList
 
-    def _GetListSyncTaskFromFolder(self, taskObj):
+    def _GetListSyncTaskFromFolder(self, taskObj, originalPath=""):
         pathList=[]
         for entry in os.scandir(taskObj.GetLocalPath()):
-            statAttr = os.stat(entry.path)
-            pathList.append(SyncTask(
-                mirrorPath=taskObj.GetLocalPath(),
-                targetPath=entry.path,
-                isDir= self._IsDir(statAttr),
-                remoteMirror=False
-            ))
-            pathList.append(entry.path)
+            statAttr = os.stat(entry)
+            slash = "/" if self._IsDir(statAttr.st_mode) else ""
+            filename = entry.path.removeprefix(originalPath)
+            syncObj = SyncTask(
+                remoteMirror=taskObj.remoteMirror,
+                mirrorPath=taskObj.mirrorPath + filename + slash,
+                targetPath=entry.path + slash,
+                isDir= self._IsDir(statAttr.st_mode),
+            )
+
+            #logging.info("To Local Sync List added new file {}".format(syncObj.GetLocalPath()))
+            if syncObj.isDir:
+                pathList.extend(self._GetListSyncTaskFromFolder(syncObj, originalPath=syncObj.GetLocalPath()))
+            else: pathList.append(syncObj)
         return pathList
+
+
+    def _(self, taskObj):
+        return
 
     def LocalHashMd5(self, text):
         return hashlib.md5(text.encode()).hexdigest()
