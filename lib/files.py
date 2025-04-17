@@ -2,10 +2,12 @@ import os
 import shutil
 import json
 import logging
+import hashlib
+import stat
 
-from pathlib  import Path
+from paramiko import sftp_attr
+
 from dotenv import load_dotenv
-from json import JSONEncoder
 from datetime import datetime
 from getpass import getpass
 
@@ -14,7 +16,7 @@ from lib.dataformats import *
 
 print("Is dotenv:" + str(load_dotenv()))
 
-logging.basicConfig(level=logging.DEBUG)
+#logging.basicConfig(level=logging.DEBUG)
 
 class ENVPaths():
     def __init__(self):
@@ -39,8 +41,35 @@ class OSCmd(ENVPaths):
         with open(self.osdictPath) as f:
             self.osdict = json.load(f) 
 
+class _CommonManagement():
+    def __init__(self):
+        pass
 
-class RemoteFilesAndDirs(OSCmd):
+    def _IsDir(self, st_mode: str):
+        return stat.S_ISDIR(st_mode)
+
+    def _CombineMirrorAndTarget(
+        self, foundPath, fillPath, remoteMirror, originalRemoteFolder, isDir
+    ):
+        """
+        Returns proper SyncTask configure to account "remoteMirror" value.
+        """
+        if remoteMirror:
+            return SyncTask(
+                remoteMirror=remoteMirror,
+                mirrorPath=foundPath,
+                targetPath=fillPath + foundPath.removeprefix(originalRemoteFolder),
+                isDir=isDir,
+            )
+        else:
+            return SyncTask(
+                remoteMirror=remoteMirror,
+                mirrorPath=fillPath + foundPath.removeprefix(originalRemoteFolder),
+                targetPath=foundPath,
+                isDir=isDir,
+            )
+
+class RemoteFilesAndDirs(OSCmd, _CommonManagement):
     def __init__(self, client, sftp):
         super().__init__() 
         self.client = client
@@ -122,13 +151,13 @@ class RemoteFilesAndDirs(OSCmd):
     def RemoveTarget(self, path):
         if self._CheckRemoveSafePaths(path):
             if self._CheckIfFileExists(path):
-                if syncTask.isDir: _RemoveFolder(path)
-                else: _RemoveFile(path)
+                if path.isDir: self._RemoveFolder(path)
+                else: self._RemoveFile(path)
             else: 
                 msg = "Remote file/directory doesn't exist: {}".format(path)
                 logging.info(msg)
         else: 
-            msg = "Error Unsafe path {}".format(syncTask.__dict__)
+            msg = "Error Unsafe path {}".format(path)
             raise msg
 
     def _RemoveFolder(self, path):
@@ -140,7 +169,7 @@ class RemoteFilesAndDirs(OSCmd):
                 for toDelete in listDir:
                     logging.info("Found new path \'{}\' in folder {}".format(toDelete, path))
                     self.RemoveTarget(toDelete)
-            self.sft.rmdir(path)
+            self.sftp.rmdir(path)
         else:
             msg = "ERROR: Found unsafe path somehow passed check {}".format(path)
             logging.error(msg)
@@ -150,7 +179,7 @@ class RemoteFilesAndDirs(OSCmd):
         if self._CheckRemoveSafePaths(path):
             self.sftp.remove(path)
         else:
-            msg = "FERROR: found unsafe path, somehow passed check {}".format(path)
+            msg = "ERROR: found unsafe path, somehow passed check {}".format(path)
             logging.error(msg)
             raise msg
 
@@ -167,16 +196,44 @@ class RemoteFilesAndDirs(OSCmd):
         remoteList = []
         ## Should be in ConfigLoader :/
         self._ValidationMirrorTargetPath(syncObj=syncObj)
-        syncObj = self._StatSyncPathRemote(syncObj)
-        if syncObj:
-            if syncObj.isDir:
-                remoteList.extend(self._GetSyncPathRemoteFolder(syncObj=syncObj))
+        statAttr = self.GetStat(syncObj.GetRemotePath())
+        if type(statAttr) == sftp_attr.SFTPAttributes:
+            if self._IsDir(statAttr.st_mode):
+                syncObj.isDir = self._IsDir(statAttr.st_mode)
+                remoteList.append(syncObj)
+                # For now
+                remoteList.extend(self._GetSyncPathRemoteFolder(syncObj))
             else:
                 remoteList.append(syncObj)
         return remoteList
-        
 
-class LocalFilesAndDirs(OSCmd):
+    #split it
+    def _GetSyncPathRemoteFolder(self, syncObj, returnDir=True):
+        filesList = []
+        dirAttr = self.sftp.listdir_attr(syncObj.GetRemotePath())
+        for targetAtt in dirAttr:
+            relRemotePath = syncObj.GetRemotePath() + targetAtt.filename
+            isDir = self._IsDir(targetAtt.st_mode)
+            slash = "/" if isDir else ""
+            syncTask = self._CombineMirrorAndTarget(
+                foundPath=relRemotePath + slash,
+                fillPath=syncObj.GetLocalPath(),
+                originalRemoteFolder=syncObj.GetRemotePath(),
+                remoteMirror=syncObj.remoteMirror,
+                isDir=isDir,
+            )
+            if isDir:
+                if returnDir:
+                    filesList.append(syncTask)
+                filesList.extend(self._GetSyncPathRemoteFolder(syncTask))
+            elif relRemotePath:
+                filesList.append(syncTask)
+            else:
+                continue
+        return filesList
+
+
+class LocalFilesAndDirs(OSCmd,  _CommonManagement):
     def ReadJSONFile(self, path):
         try:    
             return json.load(open(path))
@@ -197,7 +254,7 @@ class LocalFilesAndDirs(OSCmd):
                 logging.error(msg, e)
                 raise e
             except Exception as e:
-                msg= "Unexpected error has occured at{}".format(path)
+                msg= "Unexpected error has occurred at{}".format(path)
                 logging.error(msg)
                 raise e
         else:
@@ -207,13 +264,13 @@ class LocalFilesAndDirs(OSCmd):
     def CreateFile (self, path):
         try:
             with open(path,"w") as f:
-                f.write(data)
+                pass
         except IOError as e:
             msg = "Could not create file with {}".format(path)
             logging.error(msg, e)
             raise e
         except Exception as e:
-            msg = "Unexpected error has occured with{}".format(path)
+            msg = "Unexpected error has occurred with{}".format(path)
             logging.error(msg)
             raise e
     
@@ -224,16 +281,18 @@ class LocalFilesAndDirs(OSCmd):
         except IOError as e:
             msg= "Could not append to file with {}".format(path)
             logging.error(msg, e)
-            raise eb
+            raise e
         except Exception as e:
-            msg= "Unexpected error has occured with{}".format(path)
+            msg= "Unexpected error has occurred with{}".format(path)
             logging.error(msg)
             raise e
 
-    def _CheckRemoveSafePaths(path):
-        if not path in self.unsafePaths:
+    """
+        def _CheckRemoveSafePaths(path):
+        if not path in self.osdict[]:
             return True
         return False
+    """
 
     def _CheckIfFileExists(self, path):
         return os.path.exists(path)
@@ -241,10 +300,10 @@ class LocalFilesAndDirs(OSCmd):
     def RemoveTarget(self, syncTask, isDir=False):
         path = syncTask.GetLocalPath()
         if self._CheckRemoveSafePaths(path):
-            if syncTask.isDir: _RemoveFolder(path)
-            else: _RemoveFile(path)
+            if syncTask.isDir: self._RemoveFolder(path)
+            else: self._RemoveFile(path)
         else: 
-            msg = "Error Unsafe path {}".format(syncTask.__dict__)
+            msg = "Error Unsafe path {}".format(syncTask.toDict())
             raise msg
 
     def _RemoveFolder(self, path):
@@ -261,11 +320,11 @@ class LocalFilesAndDirs(OSCmd):
         if self._CheckRemoveSafePaths(path):
             os.remove(path)
         else:
-            msg = "FERROR: ound unsafe path {}".format(path)
+            msg = "ERROR: Found unsafe path {}".format(path)
             logging.error(msg)
             raise msg
     
-    def CreateSyncTask(self, taskObj):
+    def CreateSyncTaskList(self, taskObj):
         localPath = taskObj.GetLocalPath()
         if os.path.isfile(localPath):
             taskObj.isDir = False
@@ -278,17 +337,18 @@ class LocalFilesAndDirs(OSCmd):
                 mirrorPath=taskObj.mirrorPath,
                 targetPath=taskObj.targetPath
             )
-            self.GetLocalSyncTaskList(self._GetListSyncTaskFiles(taskObj=taskObj))
+            taskList.append(self._GetListSyncTaskFromFolder(taskObj=taskObj))
             return taskList
 
     def _GetListSyncTaskFromFolder(self, taskObj):
         pathList=[]
-        for entry in os.scandir(path):
+        for entry in os.scandir(taskObj.GetLocalPath()):
+            statAttr = os.stat(entry.path)
             pathList.append(SyncTask(
                 mirrorPath=taskObj.GetLocalPath(),
                 targetPath=entry.path,
-                isDir=None,
-                remoteMirror=True
+                isDir= self._IsDir(statAttr),
+                remoteMirror=False
             ))
             pathList.append(entry.path)
         return pathList
@@ -308,34 +368,39 @@ class ConfigLoader(LocalFilesAndDirs):
         for path in folders:
             self.CreateFolder(path) 
 
-    def GenerateClientConfig(name:str, hostname:str, mirrorPath:str, targetPath:str, user:str ,passwordReq: bool = True, keyPath:str="", remoteMirror=True, isDir=False, toFile = False):
-        if name and toFile:
-            name = self._ValidateClientConfigName(filename, toFile=False )
-            configPath = self.configFolder + name
-        elif not name: 
-            name = self.GetFilename() 
+    def GenerateClientConfig(self, hostname:str, mirrorPath:str, targetPath:str,
+                             user:str ,configName:str, timeout:int, passwordReq: bool = True, keyPath:str="", remoteMirror=True,
+                             isDir=False, toFile = False):
+
+        if configName and toFile:
+            configName = self._ValidateClientConfigName(configName, toFile=False)
+            configPath = self.configFolder + configName
+        elif not configName :
             configPath = ""
-        else: cofigPath = ""
-        if not pwd:
-            pwd = InputPassword()
+            configName = self._RandomName()
+        else: configPath = ""
+        pwd = self.InputPassword() if passwordReq else ""
 
         cfg = ClientConfig(
             syncType="ZeroToOne",
-            passwordReq=True,
-            configPath= cofigPath,
-            configName = name,
+            passwordReq=passwordReq,
+            configPath= configPath,
+            configName = configName,
             user = user,
             pwd = pwd,
             keyPath = keyPath,
             hostname = hostname,
             paths = SyncTask(remoteMirror=remoteMirror, mirrorPath=mirrorPath, targetPath=targetPath, isDir=isDir)
         )
+        # less fun until i don't have autosyncing no need for creating object.
+        cfg.times["timeout"] = timeout
         if toFile:
-            self.CreateFile(self.configPath)
+            self.CreateFile((self.configPath) + ".json")
         return cfg
     
-    def InputPassword():
+    def InputPassword(self):
         pwd = getpass("Please enter password to Instance: ")
+        return pwd
 
     def CheckIfConfigFolderExists(self) -> bool:
         b = os.path.isdir(self.configFolder)
@@ -367,12 +432,12 @@ class ConfigLoader(LocalFilesAndDirs):
             logging.error("Global Configuration file seems to have incorrect names or values. Error msg {e}")
             raise te
 
-        logging.info("Global Configuration has been succesfuly loaded. \n\t{}".format(globalConfiguration) )
+        logging.info("Global Configuration has been successfully loaded. \n\t{}".format(globalConfiguration) )
         return globalConfiguration
     
     def _ValidateClientConfigName(self, name, asFile=True):
         if not type(name)==str:
-            msg = "Recived empty string or different type"
+            msg = "Received empty string or different type"
             logging.error(msg)
         name, ext = os.path.splitext(name)
         if asFile and ext=='.json':
@@ -403,10 +468,11 @@ class ConfigLoader(LocalFilesAndDirs):
     def LoadClientConfig(self, configLoc):
         try:
             name = self._ValidateClientConfigName(os.path.basename(configLoc), asFile=False)
-            print(name)
             data = self.ReadJSONFile(path=configLoc)
             data["paths"] = [SyncTask(remoteMirror= x["remoteMirror"], mirrorPath=x["mirrorPath"], targetPath=x["targetPath"]) for x in data["paths"]]
             return ClientConfig(**data, configName=name, configPath=configLoc)
         except TypeError as te:
             logging.error("Configuration Client {} file  seems to have incorrect names or values. Error msg {}".format(name, te))
             raise(te)
+        except Exception as e:
+            raise e

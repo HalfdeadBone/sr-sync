@@ -65,7 +65,7 @@ class DataConfig:
     configPath: str = ""
     times: _TimesData = _TimesData
 
-    def toDict():
+    def toDict(self):
         return self.__dict__
 
 @dataclass(slots=True,init=True)

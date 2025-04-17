@@ -5,6 +5,9 @@ import json
 import stat
 import logging
 import hashlib
+
+from dotenv.parser import Original
+
 import lib.dataformats as dataformats
 from lib.files import LocalFilesAndDirs, RemoteFilesAndDirs
 from lib.dataformats import PathDict, HashDict, SyncTask
@@ -25,11 +28,12 @@ class SimpleSSHClient:
         self._ConnectToHost() #Set client
         
         # Init Remote Managment and set platform for it
-        self.RemoteManagment = RemoteFilesAndDirs()
-        self._RemotePlatform(client= self.client, sftp = self.sftp)
+        self.RemoteManagment = RemoteFilesAndDirs(client = self.session, sftp=self.sftp)
+        #self._RemotePlatform() #disabled
 
     def _SetConfigValues(self):
         if self.config:
+            self.name =  self.config.configName
             self.hostname = self.config.hostname
             self.user = self.config.user
             self.key = self.config.keyPath if self.config.keyPath else None
@@ -42,17 +46,20 @@ class SimpleSSHClient:
         )
         self.session.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         try:
+            print(self.config)
             self.session.connect(
                 hostname=self.hostname,
                 username=self.user,
                 password=self.pwd,
                 key_filename=self.key,
+                timeout=self.config.times["timeout"]
             )
             logging.info("Connected via SSH to '{}'".format(self.name))
+            self.sftp = self.session.open_sftp()
         except Exception as e:
-            raise AttributeError(e)
+            raise e
 
-    def _RemotePlatform(self, pathList, relPath):
+    def _RemotePlatform(self):
         self.RemoteManagment.GetPlatform()
 
     ### IDEA VALIDATION OF CONFIG SHOULD RETURN error type + MSG
@@ -81,72 +88,23 @@ class SimpleSSHClient:
     def _IsDir(self, st_mode: str):
         return stat.S_ISDIR(st_mode)
 
-    def _GetSyncPathRemoteFolder(self, syncObj, returnDir=True):
-        filesList = []
-        dirAttr = self.sftp.listdir_attr(syncObj.GetRemotePath())
-        for targetAtt in dirAttr:
-            relRemotePath = syncObj.GetRemotePath() + targetAtt.filename
-            isDir = self._IsDir(targetAtt.st_mode)
-            slash = "/" if isDir else ""
-            syncTask = self._CombineMirrorAndTarget(
-                foundPath=relRemotePath + slash,
-                fillPath=syncObj.GetLocalPath(),
-                originalRemoteFolder=syncObj.GetRemotePath(),
-                remoteMirror=syncObj.remoteMirror,
-                isDir=isDir,
-            )
-            if isDir:
-                if returnDir:
-                    filesList.append(syncTask)
-                filesList.extend(self._GetSyncPathRemoteFolder(syncTask))
-            elif relRemotePath:
-                filesList.append(syncTask)
-            else:
-                continue
-        return filesList
-
-    def _StatSyncPathRemote(self, syncObj):
-        pathAttr = self.sftp.stat(syncObj.GetRemotePath())
-        if type(pathAttr) == paramiko.sftp_attr.SFTPAttributes:
-            syncObj.isDir = self._IsDir(pathAttr.st_mode)
-            return syncObj
-        else:
-            return None
-
-    def _CombineMirrorAndTarget(
-        self, foundPath, fillPath, remoteMirror, originalRemoteFolder, isDir
-    ):
-        """
-        Returns proper SyncTask configure to account "remoteMirror" value.
-        """
-        if remoteMirror:
-            return SyncTask(
-                remoteMirror=remoteMirror,
-                mirrorPath=foundPath,
-                targetPath=fillPath + foundPath.removeprefix(originalRemoteFolder),
-                isDir=isDir,
-            )
-        else:
-            relPath = foundPath.removeprefix(originalRemoteFolder)
-            return SyncTask(
-                remoteMirror=remoteMirror,
-                mirrorPath=fillPath + foundPath.removeprefix(originalRemoteFolder),
-                targetPath=foundPath,
-                isDir=isDir,
-            )
-
-
-    def EstablishSftp(self):
-        self._ConnectToHost()
-        self.sftp = self.session.open_sftp()
 
     def ReSyncListOfSyncTask(self, syncTaskList):
         #syncTaskList change to self.LastTaskList, allows to just call last sync
-        a = self.config.GetPathList()
-        fresh = [data for data in self._GetListSyncPathRemoteFiles(a[0])]
+        originalTask = self.config.GetPathList()
 
-        oldSync = set([json.dumps(x.__dict__) for x in syncTaskList])
-        newSync = set([json.dumps(x.__dict__) for x in fresh])
+        # Logic -> Our "past" Experience is target folder/file in original task.
+        # If so. All I have to do is pass to function old data and ingnore Check for
+        # if remoteMirror, but keep it. Thanks to set hasing if they are the same,
+        # it will be popped / move to different task.
+        if originalTask[0].remoteMirror:
+            fresh = [data for data in self.LocalManagment.CreateSyncTask(originalTask[0])]
+        else:
+            fresh = [data for data in self.RemoteManagment.CreateSyncTask(originalTask[0])]
+
+
+        oldSync = set([json.dumps(x.toDict()) for x in syncTaskList])
+        newSync = set([json.dumps(x.toDict()) for x in fresh])
         toMove = None
         toRemove = None
 
@@ -274,14 +232,16 @@ class SimpleSSHClient:
     def GetSyncTaskList(self, taskList):
         syncList = []
         for taskObj in taskList:
-            if taskObj.remoteMirror: syncList.append(**self.RemoteManagment.CreateSyncTask(taskObj))
-            else: syncList.append(**self.fLocalFilesAndDirs.CreateSyncTask(taskObj))
+            if taskObj.remoteMirror:
+                val = self.RemoteManagment.CreateSyncTask(taskObj)
+                syncList.extend(val)
+            else: syncList.extend(self.LocalManagment.CreateSyncTask(taskObj))
         return syncList
 
     def PutChosenTarget(self, syncObj):
         if syncObj.isDir and not self.sftp.stat(syncObj.GetRemotePath()):
             self.sftp.mkdir(syncObj.GetRemotePath())
-        self.sft.put(
+        self.sftp.put(
             localpath=syncObj.GetLocalPath(), remotepath=syncObj.GetRemotePath()
         )
         logging.info("Downloaded file: {}".format(syncObj.GetRemotePath()))
