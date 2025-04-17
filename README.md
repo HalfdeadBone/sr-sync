@@ -20,7 +20,7 @@ Project created for the interview and being fixed as side-project for experience
         - [X] Create
         - [X] Remove
         - [X] Put
-        - [ ] platform Matching
+        - [X] platform Matching
         - [ ] SSH cmdline capabilities 
     - [ ] Hash Version Control
 - [X] Sync (`One2Zero`)
