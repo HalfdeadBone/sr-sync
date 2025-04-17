@@ -4,7 +4,7 @@
         "Linux":"uname", 
         "Win":  "ver"
     },
-    "win":{
+    "Win":{
         "unsafePaths": ["C:\\", "D:\\ " , ".", "..", " " ],
         "md5": ""
     },
@@ -12,7 +12,7 @@
         "unsafePaths": ["/", " " , ".", ".." ],
         "md5": "md5sum -b"
     },
-    "MacOs":{
+    "MacOS":{
         "unsafePaths": ["/", " " , ".", ".." ],
         "md5": "md5"
     }
