@@ -1,7 +1,5 @@
 from dotenv import load_dotenv
 import os
-import logging
-import defGlobals
 
 load_dotenv()
 
