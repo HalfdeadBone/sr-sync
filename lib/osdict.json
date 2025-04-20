@@ -5,15 +5,30 @@
         "Win":  "ver"
     },
     "Win":{
-        "unsafePaths": ["C:\\", "D:\\ " , ".", "..", " " ],
-        "md5": ""
+        "slash":"\\",
+        "unsafePaths": ["C:\\", "D:\\ " , ".", "..", " ", "/" ],
+        "md5": {
+            "base": "Get-FileHash",
+            "flags": "-Algorithm MD5",
+            "pipeline": "| Select-Object Hash"
+        }
     },
     "Linux":{
+        "slash":"/",
         "unsafePaths": ["/", " " , ".", ".." ],
-        "md5": "md5sum -b"
+        "md5": {
+            "base": "md5sum",
+            "flags": "-b",
+            "pipeline": "| cut -c -32 "
+        }
     },
     "MacOS":{
+        "slash":"/",
         "unsafePaths": ["/", " " , ".", ".." ],
-        "md5": "md5"
+        "md5": {
+            "base": "md5",
+            "flags": "",
+            "pipeline": ""
+        }
     }
 }
