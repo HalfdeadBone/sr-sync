@@ -3,11 +3,8 @@ import paramiko
 import lib.files as files
 from lib.cmd import *
 import lib.connections as connections
-from lib.dataformats import *
 import  logging
 
-import hashlib
-import json
 import sys
     
 def main():

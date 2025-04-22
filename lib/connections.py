@@ -241,7 +241,7 @@ class SimpleSSHClient:
             if taskObj.remoteMirror:
                 val = self.RemoteManagment.CreateSyncTask(taskObj)
                 syncList.extend(val)
-            else: syncList.extend(self.LocalManagment.CreateTaskList(taskObj))
+            else: syncList.extend(self.LocalManagment.CreateSyncTaskList(taskObj))
         return syncList
 
     def PutChosenTarget(self, syncObj):
