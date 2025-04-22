@@ -156,9 +156,9 @@ class RemoteFilesAndDirs(OSCmd, __CommonManagement):
             out.append(HashDict(md5, path))
         return out
 
-    def _CheckIfFileExists(self, path):
+    def CheckIfFileExists(self, path):
         try:
-            self.sftp.stat(path)
+            self.CheckIfFileExists(path)
             return True
         except: return False
 
@@ -212,7 +212,7 @@ class RemoteFilesAndDirs(OSCmd, __CommonManagement):
         for targetAtt in dirAttr:
             relRemotePath = syncObj.GetRemotePath() + targetAtt.filename
             isDir = self._IsDir(targetAtt.st_mode)
-            slash = "/" if isDir else ""
+            slash = self.GetSystemSlash(self.platform) if isDir else ""
             syncTask = self._CombineMirrorAndTarget(
                 foundPath=relRemotePath + slash,
                 fillPath=syncObj.GetLocalPath(),
@@ -228,17 +228,17 @@ class RemoteFilesAndDirs(OSCmd, __CommonManagement):
         return filesList
 
     ### LOCAL CREATE BLOCK ###
-    def CreateFodler(self):
+    def CreateFolder(self):
         pass
 
     def CreateFile(self):
         pass
 
     ### REMOTE REMOVE BLOCK ###
-    def RemoveTarget(self, path):
+    def RemoveTarget(self, path, isDir=False):
         if self.CheckRemoveSafePaths(path):
-            if self._CheckIfFileExists(path):
-                if path.isDir:
+            if self.CheckIfFileExists(path):
+                if isDir:
                     self._RemoveFolder(path)
                 else:
                     self._RemoveFile(path)
@@ -257,7 +257,9 @@ class RemoteFilesAndDirs(OSCmd, __CommonManagement):
             if listDir:
                 for toDelete in listDir:
                     logging.info("Found new path \'{}\' in folder {}".format(toDelete, path))
-                    self.RemoveTarget(toDelete)
+                    stat = self.sftp.stat(path)
+                    isDir = self._IsDir(stat.st_mode)
+                    self.RemoveTarget(toDelete, isDir=isDir)
             self.sftp.rmdir(path)
         else:
             msg = "ERROR: Found unsafe path somehow passed check {}".format(path)
@@ -318,7 +320,7 @@ class LocalFilesAndDirs(OSCmd,  __CommonManagement):
             logging.error(msg)
             raise e
 
-    def _CheckIfFileExists(self, path):
+    def CheckIfFileExists(self, path):
         return os.path.exists(path)
 
     ### LOCAL HASH BLOCK ###
@@ -348,15 +350,23 @@ class LocalFilesAndDirs(OSCmd,  __CommonManagement):
         pathList=[]
         for entry in os.scandir(taskObj.GetLocalPath()):
             statAttr = os.stat(entry)
-            slash = "/" if self._IsDir(statAttr.st_mode) else ""
-            test_slash = self.GetSystemSlash(self.platform)
+            isDir = self._IsDir(statAttr.st_mode)
+            slash = self.GetSystemSlash(self.platform) if isDir else ""
             filename = entry.path.removeprefix(originalPath)
-            syncObj = SyncTask(
-                remoteMirror=taskObj.remoteMirror,
-                mirrorPath=taskObj.mirrorPath + filename + slash,
-                targetPath=entry.path + slash,
-                isDir= self._IsDir(statAttr.st_mode),
-            )
+            if taskObj.remoteMirror:
+                syncObj = SyncTask(
+                    remoteMirror=taskObj.remoteMirror,
+                    mirrorPath=taskObj.mirrorPath + filename + slash,
+                    targetPath=entry.path + slash,
+                    isDir= isDir,
+                )
+            else:
+                syncObj = SyncTask(
+                    remoteMirror=taskObj.remoteMirror,
+                    mirrorPath=entry.path + slash,
+                    targetPath=taskObj.targetPath + filename + slash,
+                    isDir=isDir,
+                )
 
             #logging.info("To Local Sync List added new file {}".format(syncObj.GetLocalPath()))
             if syncObj.isDir:
@@ -460,7 +470,11 @@ class ConfigLoader(LocalFilesAndDirs):
             pwd = pwd,
             keyPath = keyPath,
             hostname = hostname,
-            paths = SyncTask(remoteMirror=remoteMirror, mirrorPath=mirrorPath, targetPath=targetPath, isDir=isDir)
+            paths = [SyncTask(
+                remoteMirror=remoteMirror,
+                mirrorPath=mirrorPath,
+                targetPath=targetPath,
+                isDir=isDir)]
         )
         # less fun until i don't have autosyncing no need for creating object.
         cfg.times["timeout"] = timeout
