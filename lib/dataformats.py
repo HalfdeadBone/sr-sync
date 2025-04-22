@@ -4,7 +4,7 @@ from copy import copy
 @dataclass
 class _ToJSON():
     def ToJSON(self):
-        return(self.__dict__())
+        return(self.__dict__)
 
 
 ## To fix situation remote2remote create alternative

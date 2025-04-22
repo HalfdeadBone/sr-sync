@@ -257,6 +257,8 @@ class SimpleSSHClient:
     def UpdatePathsWithHash(self, pathDictList):
         pass
 
+
+    ### ACTION BLOCK ###
     def MoveAction(self, syncObj):
         if syncObj.remoteMirror:
             self.DownloadChosenTarget(syncObj=syncObj)
@@ -265,10 +267,8 @@ class SimpleSSHClient:
 
     def RemoveAction(self, syncObj):
         logging.warning("Deleting: {}".format(syncObj.GetLocalPath()))
-        # if remoteMirror ==  True, them remove and make in local 
         if  syncObj.remoteMirror:
             self.LocalManagment.RemoveTarget(syncTask=syncObj)
-        # if not remoteMirror == False, means we are deleting remote files 
         elif not syncObj.remoteMirror:
             self.RemoteManagment.RemoveTarget(path=syncObj.GetRemotePath())
             
@@ -286,21 +286,29 @@ class SimpleSSHClient:
         elif actionType == "create":
             self.CreateAction(syncObj)
         else:
-            msg = "Recived unknown Action".format(actionType)
+            msg = "Received unknown Action".format(actionType)
             logging.error(msg)
             raise TypeError(msg)
 
     def ExecuteSync(self, toRemove: list[SyncTask], toCreate: list[SyncTask], toMove: list[SyncTask] ):
-        logging.warning("Attempting Sync Execution")
-        logging.warning("Removing unnecessary Files")
-        for syncObj in toRemove:
-            self.ExecuteAction(syncObj=syncObj,actionType='remove')
+        if toRemove or toCreate or toMove:
+            logging.warning("Attempting Sync Execution")
+            if toRemove:
+                logging.warning("Removing unnecessary Files")
+                for syncObj in toRemove:
+                    self.ExecuteAction(syncObj=syncObj,actionType='remove')
 
-        logging.info("Creating new Folders")
-        for syncObj in toCreate:
-            self.ExecuteAction(syncObj=syncObj,actionType='create')
+            if toCreate:
+                logging.info("Creating new Folders")
+                for syncObj in toCreate:
+                    self.ExecuteAction(syncObj=syncObj,actionType='create')
 
-        logging.info("Synchronizing new Files")
-        for syncObj in toMove:
-            logging.info("Synchronizing File {}".format(syncObj.mirrorPath))
-            self.ExecuteAction(syncObj=syncObj,actionType='move')
+            if toMove:
+                logging.info("Synchronizing new Files")
+                for syncObj in toMove:
+                    logging.info("Synchronizing File {}".format(syncObj.mirrorPath))
+                    self.ExecuteAction(syncObj=syncObj,actionType='move')
+        else:
+            logging.info("Nothing to be done, Skipping Syncing.")
+
+        logging.info("Execution of Syncing Has been Finished Successfully.")
