@@ -25,9 +25,8 @@ class SimpleSSHClient:
         self._SetConfigValues()
         self._ConnectToHost() #Set client
         
-        # Init Remote Managment and set platform for it
+        # Init Remote Managment
         self.RemoteManagment = RemoteFilesAndDirs(client = self.session, sftp=self.sftp)
-        #self._RemotePlatform() #disabled
 
     def _SetConfigValues(self):
         if self.config:
@@ -72,13 +71,9 @@ class SimpleSSHClient:
         except Exception as e:
             raise e
 
-    def _RemotePlatform(self):
-        self.RemoteManagment.GetPlatform()
-
     ### IDEA VALIDATION OF CONFIG SHOULD RETURN error type + MSG
     ### THEN FULL _ValidateConfig should be created
     ### Then Move it to ConfigLoader
-
     def _ValidationIsMirrorPathNotEmpty(self, syncTask, codeName):
         msg = None
         if not SyncTask.GetRemotePath():
@@ -88,42 +83,6 @@ class SimpleSSHClient:
 
     def _IsDir(self, st_mode: str):
         return stat.S_ISDIR(st_mode)
-
-
-    def ReSyncListOfSyncTask(self, syncTaskList, originalSyncTask: SyncTask):
-        #syncTaskList change to self.LastTaskList, allows to just call last sync
-
-        # Logic -> Our "past" Experience is target folder/file in original task.
-        # If so. All I have to do is pass to function old data and ingnore Check for
-        # if remoteMirror, but keep it. Thanks to set hasing if they are the same,
-        # it will be popped / move to different task.
-        if originalSyncTask.remoteMirror:
-            fresh = [data for data in self.LocalManagment.CreateSyncTaskList(originalSyncTask)]
-        else:
-            fresh = [data for data in self.RemoteManagment.CreateSyncTask(originalSyncTask)]
-
-        oldSync = set([json.dumps(x.toDict()) for x in copy(syncTaskList) if x])
-        newSync = set([json.dumps(x.toDict()) for x in copy(fresh) if x])
-
-        toMove = None
-        toRemove = None
-        toCreate = None
-
-        #print(oldSync)
-        #print (fresh)
-        if oldSync != newSync:
-            toRemove = newSync - oldSync
-            toMove = oldSync - newSync
-            toRemove = [SyncTask(**json.loads(x)) for x in toRemove]
-
-            toMove = [SyncTask(**json.loads(x)) for x in toMove]
-            toCreate = [x for x in toMove if x.isDir]
-
-        targetSync = fresh
-        #newSync needs to be verify via HASH, so here should be method for that
-        # it would need to return list of task sync, after pathDicts
-        # for now no hashing always download all
-        return toMove, toCreate, toRemove, targetSync
 
     def _GetRelPath(self, pathA: str, pathB: str, isDir=False):
         pathA = pathA.split("/")
@@ -193,9 +152,6 @@ class SimpleSSHClient:
                 )
         return None
 
-    def _HashMd5(self, text):
-        return hashlib.md5(text.encode()).hexdigest()
-
     def _LocalHash(self, pathList, relPath) -> list:
         # zrób dla jednego
         hashList = []
@@ -206,10 +162,7 @@ class SimpleSSHClient:
         return hashList
 
     def GetHash(self, relPath, pathList, remote=True):
-        if remote:
-            return self._RemoteSSHHash(pathList=pathList, relPath=relPath)
-        else:
-            return self._LocalHash(pathList=pathList, relPath=relPath)
+        pass
 
     def OpenTarget(self, path, mode="r", bufsize=-1):
         target = None
@@ -219,8 +172,6 @@ class SimpleSSHClient:
             logging.info(e)
         return target
 
-    def CheckSum(self, a, b) -> bool:
-        return self._HashMd5(a) == self._HashMd5(b)
     
     def DownloadChosenTarget(self, syncObj):
         """
@@ -241,12 +192,45 @@ class SimpleSSHClient:
             if taskObj.remoteMirror:
                 val = self.RemoteManagment.CreateSyncTask(taskObj)
                 syncList.extend(val)
-            else: syncList.extend(self.LocalManagment.CreateTaskList(taskObj))
+            else: syncList.extend(self.LocalManagment.CreateSyncTaskList(taskObj))
         return syncList
+
+    def ReSyncListOfSyncTask(self, syncTaskList, originalSyncTask: SyncTask):
+        #syncTaskList change to self.LastTaskList, allows to just call last sync
+
+        # Logic -> Our "past" Experience is target folder/file in original task.
+        # If so. All I have to do is pass to function old data and ingnore Check for
+        # if remoteMirror, but keep it. Thanks to set hasing if they are the same,
+        # it will be popped / move to different task.
+        if originalSyncTask.remoteMirror:
+            fresh = [data for data in self.LocalManagment.CreateSyncTaskList(originalSyncTask)]
+        else:
+            fresh = [data for data in self.RemoteManagment.CreateSyncTask(originalSyncTask)]
+
+        oldSync = set([json.dumps(x.toDict()) for x in copy(syncTaskList) if x])
+        newSync = set([json.dumps(x.toDict()) for x in copy(fresh) if x])
+
+        toMove = None
+        toRemove = None
+        toCreate = None
+
+        if oldSync != newSync:
+            toRemove = newSync - oldSync
+            toMove = oldSync - newSync
+            toRemove = [SyncTask(**json.loads(x)) for x in toRemove]
+
+            toMove = [SyncTask(**json.loads(x)) for x in toMove]
+            toCreate = [x for x in toMove if x.isDir]
+
+        targetSync = fresh
+        #newSync needs to be verify via HASH, so here should be method for that
+        # it would need to return list of task sync, after pathDicts
+        # for now no hashing always download all
+        return toMove, toCreate, toRemove, targetSync
 
     def PutChosenTarget(self, syncObj):
         if syncObj.isDir:
-            if not self.sftp.stat(syncObj.GetRemotePath()):
+            if not self.RemoteManagment.CheckIfFileExists(syncObj.GetRemotePath()):
                 self.sftp.mkdir(syncObj.GetRemotePath())
         else:
             self.sftp.put(
@@ -257,6 +241,8 @@ class SimpleSSHClient:
     def UpdatePathsWithHash(self, pathDictList):
         pass
 
+
+    ### ACTION BLOCK ###
     def MoveAction(self, syncObj):
         if syncObj.remoteMirror:
             self.DownloadChosenTarget(syncObj=syncObj)
@@ -265,12 +251,10 @@ class SimpleSSHClient:
 
     def RemoveAction(self, syncObj):
         logging.warning("Deleting: {}".format(syncObj.GetLocalPath()))
-        # if remoteMirror ==  True, them remove and make in local 
         if  syncObj.remoteMirror:
             self.LocalManagment.RemoveTarget(syncTask=syncObj)
-        # if not remoteMirror == False, means we are deleting remote files 
         elif not syncObj.remoteMirror:
-            self.RemoteManagment.RemoveTarget(path=syncObj.GetRemotePath())
+            self.RemoteManagment.RemoveTarget(path=syncObj.GetRemotePath(), isDir=syncObj.isDir)
             
     def CreateAction(self, syncObj):
         if syncObj.remoteMirror:
@@ -286,21 +270,29 @@ class SimpleSSHClient:
         elif actionType == "create":
             self.CreateAction(syncObj)
         else:
-            msg = "Recived unknown Action".format(actionType)
+            msg = "Received unknown Action".format(actionType)
             logging.error(msg)
             raise TypeError(msg)
 
     def ExecuteSync(self, toRemove: list[SyncTask], toCreate: list[SyncTask], toMove: list[SyncTask] ):
-        logging.warning("Attempting Sync Execution")
-        logging.warning("Removing unnecessary Files")
-        for syncObj in toRemove:
-            self.ExecuteAction(syncObj=syncObj,actionType='remove')
+        if toRemove or toCreate or toMove:
+            logging.warning("Attempting Sync Execution")
+            if toRemove:
+                logging.warning("Removing unnecessary Files")
+                for syncObj in toRemove:
+                    self.ExecuteAction(syncObj=syncObj,actionType='remove')
 
-        logging.info("Creating new Folders")
-        for syncObj in toCreate:
-            self.ExecuteAction(syncObj=syncObj,actionType='create')
+            if toCreate:
+                logging.info("Creating new Folders")
+                for syncObj in toCreate:
+                    self.ExecuteAction(syncObj=syncObj,actionType='create')
 
-        logging.info("Synchronizing new Files")
-        for syncObj in toMove:
-            logging.info("Synchronizing File {}".format(syncObj.mirrorPath))
-            self.ExecuteAction(syncObj=syncObj,actionType='move')
+            if toMove:
+                logging.info("Synchronizing new Files")
+                for syncObj in toMove:
+                    logging.info("Synchronizing File {}".format(syncObj.mirrorPath))
+                    self.ExecuteAction(syncObj=syncObj,actionType='move')
+        else:
+            logging.info("Nothing to be done, Skipping Syncing.")
+
+        logging.info("Execution of Syncing Has been Finished Successfully.")
