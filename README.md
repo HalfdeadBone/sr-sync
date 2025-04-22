@@ -56,8 +56,6 @@ Project created for the interview and being fixed as side-project for experience
     - [ ] `ClientConfig` changes name to `JobConfig`, and move `hostname`,`user`, `key`, `pwd`, `passwordReq` `paths` to new `targets: list[TargetSync()]`. Each target happens after another in order. `mirrorRemote` will be default in `TargetSync`, but the one in `paths:[SyncType]` will be dominant
     - [ ] Scheduler
     
-## Notice 
-LOCAL MIRROR to REMOTE SOURCE is broken.
 
 ## Installation
 Download and create `virtualenv` with name `venv` and enter it with `source`
