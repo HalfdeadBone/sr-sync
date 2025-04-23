@@ -77,6 +77,7 @@ class ClientConfig(DataConfig):
     user: str = ""
     keyPath: str = ""
     pwd:str = ""
+    cleanTransfer: bool = False
     paths: list[SyncTask] = field(default_factory=list[SyncTask])
     errorPaths: list[str] = field(default_factory=list)
      

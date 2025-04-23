@@ -35,7 +35,7 @@ def InitInlineParser():
     inlineSync.add_argument("-k", "--key", help="(Optional) Takes string representing path to a key.", type=str, default=None)
     inlineSync.add_argument("-t", "--timeout", help="{Optional) Takes int representing timeout in seconds", type=int, default=120)
     inlineSync.add_argument("-c", "--createConfig", help="{Optional) Takes bool deciding to create a file", type=str, default=False)
-
+    inlineSync.add_argument("--cleanTransfer", help="(Optional) Takes bool, decidces if hash going to be used. If not all information will be downloaded/put", type=bool, default=False )
     args = parser.parse_args()
 
     return(args)

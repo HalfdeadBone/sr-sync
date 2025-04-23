@@ -21,6 +21,7 @@ class SimpleSSHClient:
         self.pwd = ""
         self.config = config
         self.LocalManagment = LocalFilesAndDirs() #Platform Inside
+        self.cleanTransfer = self.config.cleanTransfer
         #After Basic Values
         self._SetConfigValues()
         self._ConnectToHost() #Set client
@@ -161,8 +162,25 @@ class SimpleSSHClient:
                 hashList.append(HashDict(hash=h, relPath=path.removeprefix(relPath)))
         return hashList
 
-    def GetHash(self, relPath, pathList, remote=True):
-        pass
+    def ActionMd5Hash(self, syncList):
+        toUpdate = []
+        for syncObj in syncList:
+            if not syncObj.isDir:
+                remote = self.RemoteManagment.GetHashMd5(syncObj)
+                local = self.LocalManagment.GetHashMd5(syncObj)
+                if not local == remote:
+                    toUpdate.append(syncObj)
+        return toUpdate
+
+    def ActionCheckChanges(self, syncList, hashtype="md5") -> list:
+        logging.info("Checking hashes for: {}".format(syncList))
+        if hashtype == "md5":
+            toUpdate = self.ActionMd5Hash(syncList)
+            return toUpdate
+        else:
+            msg = "Incorrect type of hashing for version control"
+            logging.error(msg)
+            raise TypeError(msg)
 
     def OpenTarget(self, path, mode="r", bufsize=-1):
         target = None
@@ -195,13 +213,35 @@ class SimpleSSHClient:
             else: syncList.extend(self.LocalManagment.CreateSyncTaskList(taskObj))
         return syncList
 
+    # TODO: IDEA Repetition
+    """
+    During SyncTask list create 2 lists being Folder and Files, should help with few problems and looping
+    for folders and filtering it. I feel like i have 20 isDir questions
+    Although More RAM usage :/ But less looping and less checks = less time
+    As for hashing... There is a problem how i want to check it
+    Considering we've got few scenarios that are not ideal.
+    Create Hashmap? Create SyncObj Extended? I cannot (for now and multi os) get sum folder due to 
+    Inconsistency between os (for now like i can do custom script but not sure)
+    But at the same time looping each time... If loops where spins, i would be the helicopter.
+    
+    Idea HashMap -> fullPath? Or hash as key for SyncObj, To compare just set(keys)? 
+    but still i would need to compare Dirs differently, by tranforming them all into set 
+    
+    Also -> If multiple sync from different places (in config multiple paths) i could combine it
+    But .. idk how hashes would behave. In theory should be fine, especially with sum, but idk
+    
+    Also Excluding files not to copy... AAAAAAAAAAAAAAAAaaa....
+    Handling Delete? Should i delete files in dir???
+    
+    My comments be like https://www.youtube.com/watch?v=g6t8g6ka4W0
+    """
     def ReSyncListOfSyncTask(self, syncTaskList, originalSyncTask: SyncTask):
-        #syncTaskList change to self.LastTaskList, allows to just call last sync
+        # TODO
+        # Fix repetition and looping. Hash can be moved to be kept or downloaded to syncTask or do it as a sum
+        # Don't synchronize "Files" being dicts
 
-        # Logic -> Our "past" Experience is target folder/file in original task.
-        # If so. All I have to do is pass to function old data and ingnore Check for
-        # if remoteMirror, but keep it. Thanks to set hasing if they are the same,
-        # it will be popped / move to different task.
+        isClean = self.cleanTransfer
+
         if originalSyncTask.remoteMirror:
             fresh = [data for data in self.LocalManagment.CreateSyncTaskList(originalSyncTask)]
         else:
@@ -210,17 +250,28 @@ class SimpleSSHClient:
         oldSync = set([json.dumps(x.toDict()) for x in copy(syncTaskList) if x])
         newSync = set([json.dumps(x.toDict()) for x in copy(fresh) if x])
 
-        toMove = None
-        toRemove = None
-        toCreate = None
+        toMove = []
+        toRemove = []
+        toCreate = []
 
-        if oldSync != newSync:
+        if isClean:
             toRemove = newSync - oldSync
-            toMove = oldSync - newSync
-            toRemove = [SyncTask(**json.loads(x)) for x in toRemove]
+            toMove = newSync
 
+            toRemove = [SyncTask(**json.loads(x)) for x in toRemove]
+            toCreate = [x for x in toMove if x.isDir]
+
+        else:
+            #toRemove = newSync - oldSync
+            toMove = newSync if isClean else oldSync - newSync
+
+            #toRemove = [SyncTask(**json.loads(x)) for x in toRemove]
             toMove = [SyncTask(**json.loads(x)) for x in toMove]
             toCreate = [x for x in toMove if x.isDir]
+
+            toCheck = newSync & oldSync
+            toCheck = [SyncTask(**json.loads(x)) for x in toCheck]
+            toMove.extend(self.ActionCheckChanges(syncList=toCheck))
 
         targetSync = fresh
         #newSync needs to be verify via HASH, so here should be method for that
@@ -231,6 +282,7 @@ class SimpleSSHClient:
     def PutChosenTarget(self, syncObj):
         if syncObj.isDir:
             if not self.RemoteManagment.CheckIfFileExists(syncObj.GetRemotePath()):
+                logging.info("Creating Folder {}".format(syncObj.GetRemotePath()))
                 self.sftp.mkdir(syncObj.GetRemotePath())
         else:
             self.sftp.put(

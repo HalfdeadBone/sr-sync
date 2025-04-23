@@ -53,13 +53,13 @@ class OSCmd(ENVPaths):
 
     # Maybe split in a future where cmd redirects to certain cmd...
     # For now we have only Hash
-    def __GetMd5HashCMD(self, platform) -> str:
+    def GetMd5HashCMD(self, platform) -> str:
         """
         Returns Hash command as string to use with method str.format()
         :param platform: platform set by the class
         """
         cmdDict = self.osdict[platform]['md5']
-        cmd =  str(cmdDict["base"] + " {} " + cmdDict["flags"] + " " + ["pipeline"])
+        cmd =  str(cmdDict["base"] + " {} " + cmdDict["flags"] + " " + cmdDict["pipeline"])
         return cmd
 
 
@@ -158,7 +158,7 @@ class RemoteFilesAndDirs(OSCmd, __CommonManagement):
 
     def CheckIfFileExists(self, path):
         try:
-            self.CheckIfFileExists(path)
+            self.sftp.stat(path)
             return True
         except: return False
 
@@ -227,7 +227,7 @@ class RemoteFilesAndDirs(OSCmd, __CommonManagement):
             else: filesList.append(syncTask)
         return filesList
 
-    ### LOCAL CREATE BLOCK ###
+    ### REMOTE CREATE BLOCK ###
     def CreateFolder(self):
         pass
 
@@ -274,12 +274,25 @@ class RemoteFilesAndDirs(OSCmd, __CommonManagement):
             logging.error(msg)
             raise msg
 
+    def GetHashMd5(self, syncObj) -> str:
+        out = ""
+        path = syncObj.GetRemotePath()
+        cmd = str(self.GetMd5HashCMD(self.platform)).format(path)
+        if self.CheckIfFileExists(path):
+            try:
+                stdin, stdout, stderr = self.client.exec_command(cmd)
+                out = self.__decodeSSHCommandOutput(stdout)
+            except:
+                pass
+        return out
+
+
 class LocalFilesAndDirs(OSCmd,  __CommonManagement):
     def __init__(self):
         super().__init__()
-        self._SetPlatform()
+        self.__SetPlatform()
 
-    def _SetPlatform(self):
+    def __SetPlatform(self):
         result = None
         logging.info("Attempting Finding Local Platform Type")
         for t, cmd in self.platformCommands.items():
@@ -324,11 +337,12 @@ class LocalFilesAndDirs(OSCmd,  __CommonManagement):
         return os.path.exists(path)
 
     ### LOCAL HASH BLOCK ###
-    # Assumes file exists
-    def GetHash(self, path, hashtype="md5"):
+    def GetHashMd5(self, syncObj, hashtype="md5"):
         hashed = ""
-        with open(path, "r") as f:
-            hashed = self.__HashMd5(f.read())
+        path = syncObj.GetLocalPath()
+        if os.path.isfile(path):
+            with open(path, "r") as f:
+                hashed = self.__HashMd5(f.read())
         return hashed
 
     def __HashMd5(self, text):
@@ -450,7 +464,7 @@ class ConfigLoader(LocalFilesAndDirs):
 
     def GenerateClientConfig(self, hostname:str, mirrorPath:str, targetPath:str,
                              user:str ,configName:str, timeout:int, passwordReq: bool = True, keyPath:str="", remoteMirror=True,
-                             isDir=False, toFile = False):
+                             isDir=False, toFile = False, cleanTransfer=False):
 
         if configName and toFile:
             configName = self._ValidateClientConfigName(configName, toFile=False)
@@ -470,6 +484,7 @@ class ConfigLoader(LocalFilesAndDirs):
             pwd = pwd,
             keyPath = keyPath,
             hostname = hostname,
+            cleanTransfer= cleanTransfer,
             paths = [SyncTask(
                 remoteMirror=remoteMirror,
                 mirrorPath=mirrorPath,
@@ -556,7 +571,8 @@ class ConfigLoader(LocalFilesAndDirs):
             data["paths"] = [SyncTask(remoteMirror= x["remoteMirror"], mirrorPath=x["mirrorPath"], targetPath=x["targetPath"]) for x in data["paths"]]
             return ClientConfig(**data, configName=name, configPath=configLoc)
         except TypeError as te:
-            logging.error("Configuration Client {} file  seems to have incorrect names or values. Error msg {}".format(name, te))
+            logging.error("Configuration Client {} file seems to have incorrect names or values. Error msg {}".format(name, te))
             raise(te)
         except Exception as e:
+            logging.error("Unexpected Error has occurred {}".format(e))
             raise e
