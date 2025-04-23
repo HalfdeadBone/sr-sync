@@ -6,3 +6,4 @@ py_mess.py
 test.hash
 *log
 __pycache__
+venv

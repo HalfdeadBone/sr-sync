@@ -35,7 +35,8 @@ def main():
             keyPath=par.key,
             timeout=par.timeout,
             remoteMirror=par.remoteMirror,
-            toFile= par.createConfig
+            toFile= par.createConfig,
+            cleanTransfer=par.cleanTransfer
         )
     elif command =="loadconfig":
         cfg = [localOp.LoadClientConfig(par.path)]

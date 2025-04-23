@@ -21,8 +21,7 @@ Project created for the interview and being fixed as side-project for experience
         - [X] Remove
         - [X] Put
         - [X] platform Matching
-        - [X] SSH cmdline capabilities 
-    - [ ] Hash Version Control
+        - [X] SSH cmdline capabilities
 - [X] Sync (`One2Zero`)
     - [X] One Way 
         - [X] Remote Mirror, Local Target
@@ -42,11 +41,13 @@ Project created for the interview and being fixed as side-project for experience
         - [ ] name, status, downloads, sync time, changes
         - [ ] config disable, enable
         - [ ] target disable, enable
-- [ ] Tests
+- [ ] Tests (until i don't have consistent structure, 'cause it is 5th/6th version of dataformats hashing etc.)
 - [ ] Run Without venv
-- [ ] HashVersion control
+- [X] HashVersion control
+  -  [X] Works
+  -  [ ] Optimized?
 - [ ] Clean Code
-    - [ ] Repetition
+    - [X] Repetition
     - [ ] Formating PEP
     - [ ] `class` Clarity and integrity (Names And Location, fe. jobs of putting/sendig/removing -> sshclient, but functions to do those and manage in Remote- and Local- FilesandDirs)
 - [ ] Multiprocessing / thread per config (Only when all above done AND CLEAN)
@@ -60,7 +61,7 @@ Project created for the interview and being fixed as side-project for experience
 ## Installation
 Download and create `virtualenv` with name `venv` and enter it with `source`
 ```bash
-python -m virtualenv ve- [ ] Clean Code
+python -m virtualenv venv 
 source  venv/bin/activate
 pip3 install -r requierments.txt
 ```
@@ -78,7 +79,7 @@ cmd parameters have 3 subcommands being: `autorun`, `localconfig`, `manual`.
 - `loadconfig` is manual start for certain config, might be outside the `sr-sync/conf`. Use `-p` to enter full path
 - `manual`  use -h for more info, It takes only one mirror-path and target-path. To use multiple instances use config.
 ```commandline
-pytest main.py manual -N <distinct-name> -H <hostname> -M  <mirror-path> -T <target-path> -u <remote-user> -k  <key-location>  -t <ssh-timeout-in-sec>
+pytest main.py manual -N <distinct-name> -H <hostname> -M  <mirror-path> -T <target-path> -u <remote-user> -k  <key-location>  -t <ssh-timeout-in-sec> --cleanTransfer <bool>
 ```
 
 ### ClientConfig
@@ -98,6 +99,7 @@ Loading configs manualy by `loadconfig` doesn't require that.
     "pwd": "<password>",
     "keyPath": "<path-to-your-key>",
     "passwordReq": false,
+    "cleanTransfer": false,
     "paths":[
         {
             "mirrorPath": "<path-which-is-mirror>",
@@ -109,17 +111,17 @@ Loading configs manualy by `loadconfig` doesn't require that.
 }
 
 ```
-|              Name              | Explanation                                                                                                                                                                           |   Default    |
-|:------------------------------:|---------------------------------------------------------------------------------------------------------------------------------------------------------------|:------------:|
-|  `syncType` (string) Abandon   | `Zero2One`- One way sync where client treats mirror device as absolute version, and all is downloaded to target <br>  `One2One` - versions are tracked and sync in between each other |  `Zero2One`  |
-|            `times`             | Keeps data about times, timeouts and in future timeintervals of sync                                                                                                                  |              |
-|       `hostname`(string)       | Remote ssh adress                                                                                                                                                                     |              |
-|        `user` (string)         | Remote ssh user                                                                                                                                                                       |              |
-|         `pwd`(string)          | Remote ssh password                                                                                                                                                                   |              |
-| `passwordReq` (bool) dissabled | Is Password Req to log in                                                                                                                                                             |   `False`    |
-|      `keyPath`  (string)       | Path to ssh key                                                                                                                                                                       |              |
-|            `paths`             | list of Sync Tasks, based on which files will be downloaded/sent                                                                                                                      |              |
-
+|              Name              | Explanation                                                                                                                                                                           |  Default   |
+|:------------------------------:|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:----------:|
+|  `syncType` (string) Abandon   | `Zero2One`- One way sync where client treats mirror device as absolute version, and all is downloaded to target <br>  `One2One` - versions are tracked and sync in between each other | `Zero2One` |
+|            `times`             | Keeps data about times, timeouts and in future timeintervals of sync                                                                                                                  |            |
+|       `hostname`(string)       | Remote ssh adress                                                                                                                                                                     |            |
+|        `user` (string)         | Remote ssh user                                                                                                                                                                       |            |
+|         `pwd`(string)          | Remote ssh password                                                                                                                                                                   |            |
+| `passwordReq` (bool) dissabled | Is Password Req to log in                                                                                                                                                             |  `False`   |
+|      `keyPath`  (string)       | Path to ssh key                                                                                                                                                                       |            |
+|            `paths`             | list of Sync Tasks, based on which files will be downloaded/sent                                                                                                                      |            |
+|     `cleanTransfer`(bool)      | If True, target will be cleaned to match the mirror state                                                                                                                             |  `False`   |
 
 #### `paths`
 |         Name          | Explanation                                                         | Default |
